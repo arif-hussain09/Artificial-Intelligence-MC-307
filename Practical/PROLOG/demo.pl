@@ -36,3 +36,14 @@ fibo(0,0).
 fibo(1,1).
 
 % Rules
+fibo(N,Result):-
+    N>1,
+    N1 is N-1,
+    N2 is N-2,
+    fibo(N1,R1),
+    fibo(N2,R2),
+    Result is R1+R2.
+
+print_fibo(N):-
+    fibo(N,Result),
+    write('The fibonacci of '), write(N), write(' is '), write(Result), nl.
