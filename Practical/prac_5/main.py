@@ -1,164 +1,161 @@
-import random
-from typing import List, Tuple
+import heapq
 
-# --------------------------------------------------------------------------
-# 1. HELPER FUNCTIONS for PARSING and EVALUATION
-# --------------------------------------------------------------------------
+class PuzzleNode:
+    """A class to represent a state in the 8-puzzle search tree."""
+    def __init__(self, state, parent=None, move=None, g=0):
+        self.state = state
+        self.parent = parent
+        self.move = move
+        self.g = g  # Cost from start to current node
+        self.h = self.calculate_manhattan_distance() # Heuristic cost to goal
+        self.f = self.g + self.h # Total estimated cost
 
-def parse_dimacs_from_string(dimacs_string: str) -> Tuple[List[Tuple[int, ...]], int]:
+    def __lt__(self, other):
+        """Comparator for the priority queue."""
+        return self.f < other.f
+
+    def calculate_manhattan_distance(self):
+        """
+        Calculates the Manhattan distance heuristic for the current state.
+        The distance is the sum of the Manhattan distances of each tile 
+        from its goal position.
+        """
+        distance = 0
+        goal_state = ((1, 2, 3), (4, 5, 6), (7, 8, 0))
+        for r in range(3):
+            for c in range(3):
+                tile = self.state[r][c]
+                if tile != 0:
+                    # Find the goal position of the tile
+                    goal_r, goal_c = -1, -1
+                    for gr in range(3):
+                        for gc in range(3):
+                            if goal_state[gr][gc] == tile:
+                                goal_r, goal_c = gr, gc
+                                break
+                    distance += abs(r - goal_r) + abs(c - goal_c)
+        return distance
+
+    def get_neighbors(self):
+        """Generates all valid neighbor states from the current state."""
+        neighbors = []
+        # Find the position of the empty tile (0)
+        empty_r, empty_c = -1, -1
+        for r in range(3):
+            for c in range(3):
+                if self.state[r][c] == 0:
+                    empty_r, empty_c = r, c
+                    break
+        
+        # Possible moves: up, down, left, right
+        moves = {'U': (-1, 0), 'D': (1, 0), 'L': (0, -1), 'R': (0, 1)}
+        for move_name, (dr, dc) in moves.items():
+            new_r, new_c = empty_r + dr, empty_c + dc
+            
+            if 0 <= new_r < 3 and 0 <= new_c < 3:
+                # Create a new state by swapping the empty tile
+                new_state_list = [list(row) for row in self.state]
+                new_state_list[empty_r][empty_c], new_state_list[new_r][new_c] = \
+                    new_state_list[new_r][new_c], new_state_list[empty_r][empty_c]
+                
+                # Convert back to tuple of tuples to be hashable
+                new_state = tuple(tuple(row) for row in new_state_list)
+                neighbors.append(PuzzleNode(new_state, self, move_name, self.g + 1))
+                
+        return neighbors
+
+def solve_8_puzzle(initial_state):
     """
-    Parses a 3-SAT problem from a string in standard DIMACS CNF format.
+    Solves the 8-puzzle problem using the A* search algorithm.
     
-    A formula is a list of clauses. A clause is a tuple of literals (integers).
-    Example: (x1 or ~x2 or x3) is represented as (1, -2, 3)
+    Args:
+        initial_state (tuple of tuples): The starting configuration of the puzzle.
 
     Returns:
-        - The formula as a list of clauses.
-        - The total number of variables.
+        list of str or None: A list of moves to solve the puzzle, or None if unsolvable.
     """
-    lines = dimacs_string.strip().split('\n')
-    formula = []
-    num_variables = 0
+    goal_state = ((1, 2, 3), (4, 5, 6), (7, 8, 0))
     
-    for line in lines:
-        line = line.strip()
-        # Skip comments ('c') and empty lines
-        if not line or line.startswith('c'):
-            continue
-        # The problem definition line ('p cnf num_vars num_clauses')
-        if line.startswith('p cnf'):
-            parts = line.split()
-            num_variables = int(parts[2])
-        # A line with literals for a clause
-        else:
-            # Clause lines end with a 0, which we remove
-            literals = tuple(map(int, line.split()[:-1]))
-            formula.append(literals)
-            
-    return formula, num_variables
+    # The open list is a priority queue of nodes to visit
+    open_list = []
+    # The closed set stores states that have already been visited
+    closed_set = set()
 
-def generate_random_assignment(num_variables: int) -> List[bool]:
-    """Generates a random truth assignment (a list of booleans)."""
-    return [random.choice([True, False]) for _ in range(num_variables)]
+    start_node = PuzzleNode(initial_state)
+    heapq.heappush(open_list, start_node)
 
-def calculate_score(formula: List[Tuple[int, ...]], assignment: List[bool]) -> int:
-    """
-    This is our Objective Function. It calculates how many clauses are satisfied
-    by the given assignment.
-    """
-    satisfied_count = 0
-    for clause in formula:
-        is_clause_satisfied = False
-        for literal in clause:
-            # Convert 1-indexed variable to 0-indexed list index
-            variable_index = abs(literal) - 1
-            
-            # Check if the literal's value is True under the assignment
-            if (literal > 0 and assignment[variable_index] is True) or \
-               (literal < 0 and assignment[variable_index] is False):
-                is_clause_satisfied = True
-                break  # One true literal is enough to satisfy the clause
+    while open_list:
+        # Get the node with the lowest f-score
+        current_node = heapq.heappop(open_list)
         
-        if is_clause_satisfied:
-            satisfied_count += 1
-    return satisfied_count
+        # If we reached the goal, reconstruct and return the path
+        if current_node.state == goal_state:
+            path = []
+            node = current_node
+            while node.parent is not None:
+                path.append(node.move)
+                node = node.parent
+            return path[::-1] # Reverse to get path from start to goal
 
-# --------------------------------------------------------------------------
-# 2. THE STOCHASTIC HILL CLIMBING ALGORITHM
-# --------------------------------------------------------------------------
+        closed_set.add(current_node.state)
 
-def stochastic_hill_climbing(formula: List[Tuple[int, ...]], num_variables: int, max_iterations: int = 1000):
-    """
-    Attempts to find a satisfying assignment for a 3-SAT formula.
-    """
-    total_clauses = len(formula)
-    
-    # Step 1: Initialization
-    current_assignment = generate_random_assignment(num_variables)
-    current_score = calculate_score(formula, current_assignment)
-    
-    print("🚀 Starting Stochastic Hill Climbing...")
-    print(f"Initial Score: {current_score} / {total_clauses}")
+        for neighbor in current_node.get_neighbors():
+            if neighbor.state in closed_set:
+                continue
 
-    for i in range(max_iterations):
-        # Check if we have found a solution
-        if current_score == total_clauses:
-            print(f"\n✅ Solution found at iteration {i}!")
-            return current_assignment, current_score, True
-
-        # Step 2: Deterministic Filtering - Find all better neighbors
-        uphill_moves = [] # Will store tuples of (index_to_flip, resulting_score)
-        
-        for var_idx_to_flip in range(num_variables):
-            # Create a temporary neighbor assignment by flipping one variable
-            neighbor_assignment = list(current_assignment)
-            neighbor_assignment[var_idx_to_flip] = not neighbor_assignment[var_idx_to_flip]
+            # Check if neighbor is in the open list with a higher f-score
+            in_open_list = False
+            for i, item in enumerate(open_list):
+                if item.state == neighbor.state:
+                    in_open_list = True
+                    if neighbor.g < item.g:
+                        # If we found a better path, update the node
+                        open_list[i] = neighbor
+                        heapq.heapify(open_list)
+                    break
             
-            neighbor_score = calculate_score(formula, neighbor_assignment)
-            
-            # If the neighbor is strictly better, add it to our list of candidates
-            if neighbor_score > current_score:
-                uphill_moves.append((var_idx_to_flip, neighbor_score))
+            if not in_open_list:
+                heapq.heappush(open_list, neighbor)
 
-        # Step 3: Probabilistic Selection
-        if not uphill_moves:
-            # If no better neighbors exist, we are at a local maximum
-            print(f"\n⚠️ Stuck at a local maximum at iteration {i}. No uphill moves available.")
-            return current_assignment, current_score, False
-            
-        # Randomly choose one of the good moves
-        chosen_idx, new_score = random.choice(uphill_moves)
-        
-        # Apply the chosen move to our current state
-        current_assignment[chosen_idx] = not current_assignment[chosen_idx]
-        current_score = new_score
-        
-        if (i + 1) % 50 == 0:
-            print(f"  Iteration {i+1:4d}: Current Score = {current_score}")
+    return None # No solution found
 
-    print(f"\n❌ Reached max iterations ({max_iterations}) without finding a solution.")
-    return current_assignment, current_score, False
+def print_board(state):
+    """Prints the puzzle board in a readable format."""
+    for row in state:
+        print(" ".join(str(tile) if tile != 0 else '_' for tile in row))
+    print()
 
-# --------------------------------------------------------------------------
-# 3. MAIN EXECUTION BLOCK
-# --------------------------------------------------------------------------
-
+# --- Example Usage ---
 if __name__ == "__main__":
-    # A sample 3-SAT problem in DIMACS format.
-    # This formula is satisfiable. One solution is [F, T, T, F]
-    # (x1=False, x2=True, x3=True, x4=False)
-    dimacs_problem = """
-    c A sample satisfiable 3-CNF formula.
-    p cnf 4 5
-    -1 2 3 0
-    1 -2 -3 0
-    1 2 -4 0
-    1 -3 4 0
-    -2 -3 -4 0
-    """
+    # A moderately difficult, solvable initial state
+    initial_state_tuple = ((7, 2, 4), (5, 0, 6), (8, 3, 1))
     
-    # Parse the problem from the string
-    formula, num_variables = parse_dimacs_from_string(dimacs_problem)
-    total_clauses = len(formula)
+    print("Initial State:")
+    print_board(initial_state_tuple)
     
-    print("-" * 40)
-    print(f"Problem Loaded: {num_variables} variables, {total_clauses} clauses.")
-    print("-" * 40)
+    solution_path = solve_8_puzzle(initial_state_tuple)
     
-    # Run the algorithm
-    best_assignment, best_score, found_solution = stochastic_hill_climbing(
-        formula=formula, 
-        num_variables=num_variables, 
-        max_iterations=1000
-    )
-    
-    # --- Print Final Results ---
-    print("-" * 40)
-    print("Algorithm Finished.")
-    print(f"Solution Found: {'Yes!' if found_solution else 'No.'}")
-    print(f"Final Best Score: {best_score} out of {total_clauses} clauses satisfied.")
-    
-    # Print the assignment in a readable format (e.g., x1=True, x2=False)
-    readable_assignment = [f"x{i+1}={val}" for i, val in enumerate(best_assignment)]
-    print(f"Best Assignment Found: {', '.join(readable_assignment)}")
-    print("-" * 40)
+    if solution_path:
+        print(f"Solution found in {len(solution_path)} moves!")
+        print("Path:", " -> ".join(solution_path))
+
+        # Optional: Print the states along the solution path
+        current_state = [list(row) for row in initial_state_tuple]
+        for move in solution_path:
+            er, ec = -1, -1
+            for r in range(3):
+                for c in range(3):
+                    if current_state[r][c] == 0:
+                        er, ec = r, c
+            
+            if move == 'U': nr, nc = er - 1, ec
+            elif move == 'D': nr, nc = er + 1, ec
+            elif move == 'L': nr, nc = er, ec - 1
+            elif move == 'R': nr, nc = er, ec + 1
+
+            current_state[er][ec], current_state[nr][nc] = current_state[nr][nc], current_state[er][ec]
+            print(f"\nMove: {move}")
+            print_board(tuple(tuple(row) for row in current_state))
+            
+    else:
+        print("No solution found. The puzzle might be unsolvable.")

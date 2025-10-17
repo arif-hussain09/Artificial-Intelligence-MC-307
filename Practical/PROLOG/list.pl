@@ -56,7 +56,34 @@ fibo(N,Result):-
 
 % Concatination of Two list 
 % Query ?Concat(L1,L2,L_concat)
+% fact 
+my_concat([],List,List).
 
+% Rules
+my_concat([H|T],List2,[H|ResultTail]):-
+    my_concat(T,List2,ResultTail).
 
 % Reversing a list 
+
+% The main predicate the user calls.
+my_reverse_list(List, Reversed) :-
+    my_reverse_helper(List, [], Reversed).
+
+% The helper predicate that does the actual work.
+% Base Case: When the original list is empty, the accumulator holds the final reversed list.
+my_reverse_helper([], Accumulator, Accumulator).
+
+% Recursive Step
+my_reverse_helper([H|T], Accumulator, Reversed) :-
+    my_reverse_helper(T, [H|Accumulator], Reversed).
+
+
 % Finding the last element 
+% Query : ? my_get_last([1,2,3,....,3],Result)
+% Fact
+my_get_last([H],H).
+% Rule
+my_get_last([_|T],Result):-
+    my_get_last(T,Result).
+
+
